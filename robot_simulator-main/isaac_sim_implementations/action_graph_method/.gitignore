@@ -1,0 +1,10 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Temporary mesh/import/debug artifacts
+*.tmp.*
+
+# Generated diagnostics outputs
+diagnostics/results/

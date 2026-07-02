@@ -1,0 +1,54 @@
+{
+  "topics": {
+    "left_ee_topic": "/arm_left/ee_target_pose",
+    "right_ee_topic": "/arm_right/ee_target_pose",
+    "left_pose_topic": "/arm_left/ee_current_pose",
+    "right_pose_topic": "/arm_right/ee_current_pose",
+    "left_status_topic": "/arm_left/ee_ik_status",
+    "right_status_topic": "/arm_right/ee_ik_status"
+  },
+  "links": {
+    "left_ee_link": "left_gripper_center_tcp",
+    "right_ee_link": "right_gripper_center_tcp",
+    "left_solver_base_link": "body_link3",
+    "right_solver_base_link": "body_link3"
+  },
+  "feedback": {
+    "frame_id": "base_link"
+  },
+  "arms": {
+    "left_arm_joints": [
+      "left_arm_joint1",
+      "left_arm_joint2",
+      "left_arm_joint3",
+      "left_arm_joint4",
+      "left_arm_joint5",
+      "left_arm_joint6",
+      "left_arm_joint7"
+    ],
+    "right_arm_joints": [
+      "right_arm_joint1",
+      "right_arm_joint2",
+      "right_arm_joint3",
+      "right_arm_joint4",
+      "right_arm_joint5",
+      "right_arm_joint6",
+      "right_arm_joint7"
+    ]
+  },
+  "solver": {
+    "timeout_sec": 1.0,
+    "enable_orientation": null,
+    "enable_target_smoothing": true,
+    "target_smoothing_alpha": 0.2,
+    "max_target_position_step_m": 0.015,
+    "max_target_orientation_step_rad": 0.12,
+    "direct_apply_joint_targets": true,
+    "max_joint_delta_rad": 0.12,
+    "max_joint_position_abs_rad": 6.0,
+    "orientation_position_gate_m": 0.05,
+    "approx_orientation_accept_position_error_m": 0.02,
+    "close_range_orientation_distance_m": 0.025,
+    "close_range_max_orientation_step_rad": 0.07
+  }
+}

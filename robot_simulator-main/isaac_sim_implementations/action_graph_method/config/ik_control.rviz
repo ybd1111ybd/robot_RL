@@ -1,0 +1,215 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+  - Class: rviz_common/Tool Properties
+    Name: Tool Properties
+
+Visualization Manager:
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Value: true
+      Cell Size: 0.1
+      Color: 160; 160; 164
+      Enabled: true
+      Line Style:
+        Line Width: 0.03
+        Value: Lines
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Plane: XY
+      Plane Cell Count: 20
+
+    - Class: rviz_default_plugins/RobotModel
+      Name: RobotModel
+      Description File: ""
+      Description Source: Topic
+      Description Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot_description
+      Enabled: true
+      Visual Enabled: true
+      Collision Enabled: false
+      Alpha: 1.0
+
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Frame Timeout: 15.0
+      Frames:
+        All Enabled: false
+        world: true
+        left_arm_link10: true
+        right_arm_link10: true
+      Show Axes: true
+      Show Names: true
+      Update Interval: 0.0
+
+    # 左臂当前末端位姿
+    - Class: rviz_default_plugins/Pose
+      Name: Left EE Current Pose
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /arm_left/ee_current_pose
+      Enabled: true
+      Alpha: 0.8
+      Axes Length: 0.1
+      Axes Radius: 0.01
+      Color: 85; 255; 127
+      Head Length: 0.05
+      Head Radius: 0.02
+      Shaft Length: 0.15
+      Shaft Radius: 0.01
+      Shape: Arrow
+
+    # 右臂当前末端位姿
+    - Class: rviz_default_plugins/Pose
+      Name: Right EE Current Pose
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /arm_right/ee_current_pose
+      Enabled: true
+      Alpha: 0.8
+      Axes Length: 0.1
+      Axes Radius: 0.01
+      Color: 255; 170; 127
+      Head Length: 0.05
+      Head Radius: 0.02
+      Shaft Length: 0.15
+      Shaft Radius: 0.01
+      Shape: Arrow
+
+    # 左臂目标位姿（如果有其他节点发布）
+    - Class: rviz_default_plugins/Pose
+      Name: Left EE Target Pose
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /arm_left/ee_target_pose
+      Enabled: true
+      Alpha: 1.0
+      Axes Length: 0.15
+      Axes Radius: 0.015
+      Color: 0; 255; 0
+      Head Length: 0.07
+      Head Radius: 0.03
+      Shaft Length: 0.2
+      Shaft Radius: 0.015
+      Shape: Arrow
+
+    # 右臂目标位姿
+    - Class: rviz_default_plugins/Pose
+      Name: Right EE Target Pose
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /arm_right/ee_target_pose
+      Enabled: true
+      Alpha: 1.0
+      Axes Length: 0.15
+      Axes Radius: 0.015
+      Color: 255; 127; 0
+      Head Length: 0.07
+      Head Radius: 0.03
+      Shaft Length: 0.2
+      Shaft Radius: 0.015
+      Shape: Arrow
+
+    # 交互式目标标记
+    - Class: rviz_default_plugins/InteractiveMarkers
+      Name: IK Target Marker
+      Enabled: true
+      Interactive Markers Namespace: ik_target
+
+    # IK状态显示（左臂）
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Left IK Status
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /arm_left/ee_ik_status_marker
+      Enabled: true
+
+    # IK状态显示（右臂）
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Right IK Status
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /arm_right/ee_ik_status_marker
+      Enabled: true
+
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: base_link
+    Frame Rate: 30
+
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /initialpose
+    - Class: rviz_default_plugins/PublishPoint
+      Single click: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /clicked_point
+
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 2.5
+      Enable Stereo Rendering:
+        Value: false
+      Focal Point:
+        X: 0.4
+        Y: 0.0
+        Z: 0.8
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.01
+      Pitch: 0.4
+      Target Frame: base_link
+      Yaw: 0.8
+
+Window Geometry:
+  Height: 1000
+  Width: 1600
+  X: 100
+  Y: 100

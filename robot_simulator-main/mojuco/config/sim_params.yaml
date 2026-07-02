@@ -1,0 +1,39 @@
+# MuJoCo Simulator Configuration
+
+mujoco_sim_node:
+  ros__parameters:
+    # Simulation parameters
+    sim_rate: 500.0          # Matches timestep=0.002 for real-time simulation
+    pub_rate: 200.0          # State publishing rate (Hz) - lower to reduce bandwidth
+    enable_viewer: true      # Enable MuJoCo viewer window
+    viewer_rate: 60.0        # MuJoCo viewer sync rate (Hz)
+
+    # Position control gains
+    position_control_kp: 100.0  # Proportional gain
+    position_control_kd: 10.0   # Derivative gain
+
+    # Model path (leave empty for auto-detection)
+    model_path: ""
+
+    # Startup keyframe
+    keyframe_name: "teleop_home"
+    keyframe_zero_velocity: true
+
+    # Gravity compensation
+    gravity_compensation: true
+    gravity_compensation_scale: 1.0
+    gravity_compensation_body_only: true
+    gravity_compensation_body_scale: 1.0
+    gravity_compensation_body1_scale: 1.2
+    gravity_compensation_body2_scale: 1.0
+    gravity_compensation_body3_scale: 1.0
+    gravity_compensation_filter_alpha: 1.0
+    gravity_compensation_velocity_threshold: 0.0
+    gravity_compensation_start_delay: 0.5
+    gravity_compensation_ramp_time: 2.0
+
+    # Body joint deadband (rad) to reduce small jitter
+    body_position_deadband: 0.002
+
+    # Contact simulation
+    enable_contact: true

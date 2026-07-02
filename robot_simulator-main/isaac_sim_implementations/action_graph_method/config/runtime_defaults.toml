@@ -1,0 +1,33 @@
+[app]
+fix_base = true
+domain_id = -1
+graph_path = "/ActionGraph"
+node_namespace = ""
+manual_joint_state_rate = 30.0
+control_mode = "ee_pose"
+ik_rate_hz = 50.0
+
+[topics]
+arm_left_cmd_topic = "/arm_left/joint_commands"
+arm_right_cmd_topic = "/arm_right/joint_commands"
+body_cmd_topic = "/body/joint_commands"
+arm_left_state_topic = "/arm_left/joint_states"
+arm_right_state_topic = "/arm_right/joint_states"
+body_state_topic = "/body/joint_states"
+
+[hold.arms]
+enabled = true
+stiffness = 20000.0
+damping = 1500.0
+max_force = 10000.0
+
+[hold.body]
+stiffness = 60000.0
+damping = 4000.0
+max_force = 40000.0
+posture_hold = true
+
+[demo_grasp]
+arm = "right"
+assist_attach = true
+trigger_key = "Q"

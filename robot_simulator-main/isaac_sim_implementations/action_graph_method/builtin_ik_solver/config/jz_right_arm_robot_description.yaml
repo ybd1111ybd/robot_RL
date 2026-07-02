@@ -1,0 +1,20 @@
+api_version: 1.0
+
+cspace:
+    - right_arm_joint1
+    - right_arm_joint2
+    - right_arm_joint3
+    - right_arm_joint4
+    - right_arm_joint5
+    - right_arm_joint6
+    - right_arm_joint7
+
+root_link: body_link3
+
+default_q: [ 0.7854, 0.1134, 0.0, 0.9163, 0.0, 0.0, 0.0 ]
+
+acceleration_limits: [15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0]
+jerk_limits: [7500.0, 7500.0, 7500.0, 7500.0, 7500.0, 7500.0, 7500.0]
+
+cspace_to_urdf_rules: []
+collision_spheres: []

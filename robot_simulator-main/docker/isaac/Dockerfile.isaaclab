@@ -1,0 +1,27 @@
+ARG ISAAC_SIM_IMAGE=nvcr.io/nvidia/isaac-sim:5.1.0
+FROM ${ISAAC_SIM_IMAGE}
+
+ARG ISAAC_LAB_VERSION=2.3.2.post1
+
+USER isaac-sim
+WORKDIR /isaac-sim
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1
+
+# Keep the Isaac Sim 5.1.0 PyTorch/CUDA stack intact while adding Isaac Lab.
+RUN printf '%s\n' \
+      'torch==2.7.0+cu128' \
+      'torchvision==0.22.0+cu128' \
+      'numpy<2' \
+      > /tmp/isaaclab_constraints.txt \
+    && ./python.sh -m pip install \
+      -c /tmp/isaaclab_constraints.txt \
+      "isaaclab==${ISAAC_LAB_VERSION}" \
+      --extra-index-url https://pypi.nvidia.com \
+    && ./python.sh -m pip install \
+      -c /tmp/isaaclab_constraints.txt \
+      "rl_games==1.6.5" \
+      "gym==0.26.2" \
+    && rm -f /tmp/isaaclab_constraints.txt

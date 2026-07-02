@@ -1,0 +1,66 @@
+services:
+  isaac-sim:
+    image: ${ISAAC_SIM_IMAGE:-nvcr.io/nvidia/isaac-sim:5.1.0}
+    container_name: jz-isaac-sim
+    runtime: nvidia
+    network_mode: host
+    ipc: host
+    user: "${ISAAC_CONTAINER_UID:-1234}:${ISAAC_CONTAINER_GID:-1234}"
+    stdin_open: true
+    tty: true
+    working_dir: ${CONTAINER_WORKSPACE:-/workspace}
+    environment:
+      ACCEPT_EULA: ${ACCEPT_EULA:-Y}
+      PRIVACY_CONSENT: ${PRIVACY_CONSENT:-Y}
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-all}
+      ROBOT_SIMULATOR_ROOT: ${CONTAINER_WORKSPACE:-/workspace}/robot_simulator
+      JZ_DESCRIPTION_ROOT: ${CONTAINER_WORKSPACE:-/workspace}/Jz_descripetion
+      JZ_ISAAC_LAB_ROOT: ${CONTAINER_WORKSPACE:-/workspace}/jz_isaac_lab
+      HOME: /isaac-sim
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ${ROBOT_SIMULATOR_ROOT:?set ROBOT_SIMULATOR_ROOT in .env}:${CONTAINER_WORKSPACE:-/workspace}/robot_simulator:rw
+      - ${JZ_DESCRIPTION_ROOT:?set JZ_DESCRIPTION_ROOT in .env}:${CONTAINER_WORKSPACE:-/workspace}/Jz_descripetion:rw
+      - ${JZ_DESCRIPTION_ROOT:?set JZ_DESCRIPTION_ROOT in .env}:${CONTAINER_WORKSPACE:-/workspace}/jz_descripetion:rw
+      - ${JZ_ISAAC_LAB_ROOT:?set JZ_ISAAC_LAB_ROOT in .env}:${CONTAINER_WORKSPACE:-/workspace}/jz_isaac_lab:rw
+      - ${ISAAC_CACHE_ROOT:?set ISAAC_CACHE_ROOT in .env}/cache/main:/isaac-sim/.cache:rw
+      - ${ISAAC_CACHE_ROOT:?set ISAAC_CACHE_ROOT in .env}/cache/computecache:/isaac-sim/.nv/ComputeCache:rw
+      - ${ISAAC_CACHE_ROOT:?set ISAAC_CACHE_ROOT in .env}/logs:/isaac-sim/.nvidia-omniverse/logs:rw
+      - ${ISAAC_CACHE_ROOT:?set ISAAC_CACHE_ROOT in .env}/config:/isaac-sim/.nvidia-omniverse/config:rw
+      - ${ISAAC_CACHE_ROOT:?set ISAAC_CACHE_ROOT in .env}/data:/isaac-sim/.local/share/ov/data:rw
+      - ${ISAAC_CACHE_ROOT:?set ISAAC_CACHE_ROOT in .env}/pkg:/isaac-sim/.local/share/ov/pkg:rw
+    entrypoint: ["/bin/bash"]
+
+  isaac-lab:
+    image: ${ISAAC_LAB_IMAGE:-jz-isaaclab:5.1.0}
+    container_name: jz-isaac-lab
+    runtime: nvidia
+    network_mode: host
+    ipc: host
+    user: "${ISAAC_CONTAINER_UID:-1234}:${ISAAC_CONTAINER_GID:-1234}"
+    stdin_open: true
+    tty: true
+    working_dir: ${CONTAINER_WORKSPACE:-/workspace}
+    environment:
+      ACCEPT_EULA: ${ACCEPT_EULA:-Y}
+      PRIVACY_CONSENT: ${PRIVACY_CONSENT:-Y}
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-all}
+      ROBOT_SIMULATOR_ROOT: ${CONTAINER_WORKSPACE:-/workspace}/robot_simulator
+      JZ_DESCRIPTION_ROOT: ${CONTAINER_WORKSPACE:-/workspace}/Jz_descripetion
+      JZ_ISAAC_LAB_ROOT: ${CONTAINER_WORKSPACE:-/workspace}/jz_isaac_lab
+      HOME: /isaac-sim
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ${ROBOT_SIMULATOR_ROOT:?set ROBOT_SIMULATOR_ROOT in .env}:${CONTAINER_WORKSPACE:-/workspace}/robot_simulator:rw
+      - ${JZ_DESCRIPTION_ROOT:?set JZ_DESCRIPTION_ROOT in .env}:${CONTAINER_WORKSPACE:-/workspace}/Jz_descripetion:rw
+      - ${JZ_DESCRIPTION_ROOT:?set JZ_DESCRIPTION_ROOT in .env}:${CONTAINER_WORKSPACE:-/workspace}/jz_descripetion:rw
+      - ${JZ_ISAAC_LAB_ROOT:?set JZ_ISAAC_LAB_ROOT in .env}:${CONTAINER_WORKSPACE:-/workspace}/jz_isaac_lab:rw
+      - ${ISAAC_CACHE_ROOT:?set ISAAC_CACHE_ROOT in .env}/cache/main:/isaac-sim/.cache:rw
+      - ${ISAAC_CACHE_ROOT:?set ISAAC_CACHE_ROOT in .env}/cache/computecache:/isaac-sim/.nv/ComputeCache:rw
+      - ${ISAAC_CACHE_ROOT:?set ISAAC_CACHE_ROOT in .env}/logs:/isaac-sim/.nvidia-omniverse/logs:rw
+      - ${ISAAC_CACHE_ROOT:?set ISAAC_CACHE_ROOT in .env}/config:/isaac-sim/.nvidia-omniverse/config:rw
+      - ${ISAAC_CACHE_ROOT:?set ISAAC_CACHE_ROOT in .env}/data:/isaac-sim/.local/share/ov/data:rw
+      - ${ISAAC_CACHE_ROOT:?set ISAAC_CACHE_ROOT in .env}/pkg:/isaac-sim/.local/share/ov/pkg:rw
+    entrypoint: ["/bin/bash"]
