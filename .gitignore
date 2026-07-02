@@ -1,0 +1,87 @@
+# OS and editor artifacts
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+.idea/
+.vscode/
+*.code-workspace
+
+# Python caches and build outputs
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+config.local.*
+
+# Logs, training outputs, and experiment artifacts
+logs/
+log/
+outputs/
+runs/
+tensorboard/
+wandb/
+**/logs/
+**/outputs/
+**/runs/
+**/summaries/
+**/videos/
+
+# RL checkpoints and model artifacts
+*.pth
+*.pt
+*.ckpt
+*.onnx
+*.engine
+*.safetensors
+
+# Media generated from headless playback
+*.mp4
+*.gif
+*.avi
+*.mov
+
+# Isaac Sim / Omniverse caches
+.cache/
+.nv/
+.nvidia-omniverse/
+ov/
+kit/
+
+# CMake and native build outputs
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+cmake-build-*/
+out/
+install/
+*.o
+*.obj
+*.a
+*.dll
+*.dylib
+*.exe
+
+# Nested repositories: keep their working trees visible, ignore their git internals
+**/.git/
