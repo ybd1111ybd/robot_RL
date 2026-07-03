@@ -180,6 +180,43 @@ baseline action_rate_mean: 1.451408
 baseline joint_accel_max_abs_mean: 147.527506
 ```
 
+## Easy Result: reach_easy_128env_2000it_v1
+Run status:
+- Completed.
+- Task: `Isaac-Reach-JZ-Bi-Easy-v0`.
+- Environment count: `128`.
+- Iterations: `2000`.
+- Latest checkpoint:
+  `/home/cqy/workspace/middle_platform/robot_simulator/jz_isaac_lab/logs/rl_games/jz_bi_reach/reach_easy_128env_2000it_v1/nn/last_jz_bi_reach_ep_2000_rew_36.34936.pth`
+
+Checkpoint reward trend from saved filenames:
+- Epoch 100 reward was about `8.29`.
+- Epoch 1000 reward was about `21.39`.
+- Epoch 2000 reward was about `36.35`.
+- The reward increased strongly, but the reward scale changed from baseline because progress and goal-bonus terms were added.
+
+Headless evaluation of the epoch-2000 checkpoint with `64` envs and `600` steps:
+```text
+left_error_mean: 0.868065
+left_error_last50: 0.878496
+right_error_mean: 0.800313
+right_error_last50: 0.795701
+near_goal_ratio_mean: 0.000000
+near_goal_ratio_last50: 0.000000
+settle_ratio_mean: 0.000000
+settle_ratio_last50: 0.000000
+max_action_mean: 6.864958
+action_rate_mean: 2.376478
+joint_accel_max_abs_mean: 175.599966
+```
+
+Interpretation:
+- Easy v1 is worse than baseline on actual reaching error.
+- The policy exploited the modified reward without improving near-goal behavior.
+- Action statistics became more aggressive despite reduced action scale, likely because raw policy outputs grew larger.
+- Do not continue this exact Easy v1 configuration.
+- Next variant should prioritize stronger raw-action bounding, lower learning rate or entropy, stronger action penalties, and/or a simpler fixed-target or very-near-target curriculum before reintroducing progress and goal bonuses.
+
 ## Monitoring
 TensorBoard log root:
 ```bash

@@ -21,6 +21,7 @@ Harness initialization and Isaac Lab reinforcement learning bring-up.
 - Server migration guidance has been documented for moving the project, Docker image, paths, logs, and validation workflow to another machine.
 - Baseline `reach_128env_2000it_v1` completed. Reward improved to about `2.76`, but headless evaluation still shows large TCP errors and zero near-goal ratio, so the policy is not yet a successful reaching policy.
 - User video observation showed apparent joint-limit hits and erratic motion. Experimental Easy Reach task `Isaac-Reach-JZ-Bi-Easy-v0` was added to reduce action scale, add command curriculum, and enable progress/goal/action-bound rewards.
+- Easy run `reach_easy_128env_2000it_v1` completed. Reward rose to about `36.35`, but headless evaluation worsened actual reaching error and action aggressiveness, so this exact Easy v1 configuration should not be continued.
 - Current Reach tuning rationale and parameter plan are recorded in `harness/tasks/reach_tuning_log.md`.
 
 ## Known Working Baseline
