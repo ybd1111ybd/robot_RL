@@ -1,0 +1,98 @@
+# Changelog
+
+## 2026-07-08
+- Updated the active TwoTarget Grasp approach target definition so each TCP tracks the corresponding bottle/target object center instead of the point `0.20m` above it. The TwoTarget target offset is now `(0.0, 0.0, 0.0)`.
+- Added playback debug coordinate axes to RL-Games `play.py` via `--debug_axes`, `--debug_axis_scale`, and `--debug_grasp_target_offset`. The TCP marker uses the midpoint of the two fingertip links; the target marker uses the object center plus the configured target offset. The default debug axis scale is now `0.06`.
+- Trained/validated a bottle-center TwoTarget Track approach run that can stably reach the bottle-center targets in playback, using `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-Track-v0`.
+- Preserved the current good bottle-center checkpoint at `saved_weights/grasp_twotarget_bottlecenter_good_20260707/jz_bi_grasp.pth` with its `params/agent.yaml` and `params/env.yaml`.
+- Clarified the current physics state: the robot is an Isaac Lab articulation running on Isaac Sim/PhysX; the target bottles are rigid cuboids with collision, mass, friction, and damping configured, but the current TwoTarget approach task makes them kinematic and gravity-disabled fixed targets. Full grasp training must later switch the object to dynamic behavior before contact/lift learning.
+- Updated the robot URDF to use the available `left_arm_link9.STL` and `right_arm_link9.STL` meshes for `left_arm_link9` and `right_arm_link9` visual/collision geometry instead of the missing `gripper_base_link.STL`; all URDF mesh references now resolve on disk.
+
+## 2026-07-06
+- Validated the legacy Grasp and Drawer task registrations in the active Docker-mounted `jz_isaac_lab` project on GPU 4. `Isaac-Grasp-JZ-Bi-v0` initializes with action shape `18`, observation shape `69`, four action terms, and 31 reward terms. `Isaac-Open-Drawer-JZ-Bi-v0` initializes with action shape `16`, observation shape `72`, four action terms, and 15 reward terms.
+- Recorded Grasp/Drawer zero-action drift findings: both tasks still use `JointPositionToLimitsActionCfg` arm actions, so zero action is mapped to joint-limit midpoint targets rather than holding the reset pose. Grasp and Drawer short zero-action MP4s were saved under `jz_isaac_lab/logs/debug_reach_env/`.
+- Ran as-built RL-Games smoke training for Grasp and Drawer on GPU 4 with 32 envs for 20 iterations. Grasp saved a checkpoint with reward `6.2294226`; Drawer saved a checkpoint with reward `-inf` and warned that no environment terminated before max epochs, so Drawer needs termination/evaluation checks before longer training.
+- Recorded a headless playback video for the as-built Grasp smoke checkpoint at `jz_isaac_lab/logs/rl_games/jz_bi_grasp/grasp_asbuilt_32env_20it_smoke/videos/play/rl-video-step-0.mp4`.
+- Completed as-built Grasp comparison training `grasp_asbuilt_32env_2000it_v1` on GPU 4 with 32 envs. Final reward was `16.711939`, best saved checkpoint is `jz_bi_grasp.pth` with highest observed reward about `17.25`, and a headless playback video was saved at `jz_isaac_lab/logs/rl_games/jz_bi_grasp/grasp_asbuilt_32env_2000it_v1/videos/play/rl-video-step-0.mp4`.
+- Added fixed-start Grasp task registrations `Isaac-Grasp-JZ-Bi-Fixed-v0` and `Isaac-Grasp-JZ-Bi-Fixed-Play-v0`. The fixed task disables robot gravity, fixes robot/object reset randomization, uses default-pose-offset arm actions with scale `0.20`, and adds posture/limit penalties.
+- Validated fixed-start Grasp zero-action stability: arm drift is near zero over 120 steps, while body joint drift remains about `0.025 rad`.
+- Completed fixed-start Grasp short training `grasp_fixed_32env_300it_v1` on GPU 4 with 32 envs. Final reward was `13.934165`, best checkpoint is `jz_bi_grasp.pth`, and a headless playback video was saved at `jz_isaac_lab/logs/rl_games/jz_bi_grasp/grasp_fixed_32env_300it_v1/videos/play/rl-video-step-0.mp4`.
+- Diagnosed why fixed-start Grasp still produced odd posture and failed to reach the visible target: the fixed object center starts about `1.11m` from the left TCP and `1.03m` from the right TCP, and the reward asks both hands to approach the same object center.
+- Added Grasp side-target reward helpers and a `print_grasp_object_sanity` debug mode to inspect object/TCP positions, TCP-to-object distance, TCP-to-side-target distance, joint posture deviation, and joint velocity.
+- Added approach-only Grasp task registrations `Isaac-Grasp-JZ-Bi-Approach-v0` and `Isaac-Grasp-JZ-Bi-Approach-Play-v0`. This curriculum places a fixed gravity-disabled object in a more reachable pose, trains left/right side-target approach, and disables grasp/lift/contact rewards until approach motion is stable.
+- Ran local syntax validation for the new debug/config/reward code with `PYTHONPYCACHEPREFIX=/tmp/jz_pycache python -m py_compile ...`. Docker validation needs to be run from a shell with Docker API access.
+- Added `harness/tasks/grasp_ik_rl_plan.md`, defining the staged Grasp strategy: IK sanity first, Approach-only PPO second, weak 6D orientation third, gripper/contact fourth, then small randomization.
+- Added `jz_isaac_lab/scripts/tools/debug_grasp_ik.py` to solve standalone IK targets for the Grasp/Approach environment and optionally record a joint-interpolation video from the reset pose to the IK solution. The script passed local syntax validation.
+- Fixed `JZGraspApproachEnvCfg` configuration import by adding the missing left/right TCP link constants used by its side-target observation and reward overrides.
+- Hardened `debug_grasp_ik.py` after the first container run reached environment setup but failed after reset: added explicit trace markers, standalone IK URDF path fallback, and forced traceback printing.
+- Fixed `debug_grasp_ik.py` body-chain handling for standalone IK: solver base chains such as `base_link -> body_link3` use only the body joints present in the chain instead of reshaping all five body joints.
+- Extended `debug_grasp_ik.py` video playback with `--hold_steps`, automatic minimum video length, and final simulated TCP-to-target distance printing so IK videos include a settle phase instead of ending at the interpolation target.
+- Clarified Grasp IK target interpretation after `grasp_approach_ik_sanity_v2`: final TCPs reached the virtual side targets (`0.009m` left and `0.020m` right), but `side_target_y=0.45m` is visually far from the object center and should be treated only as a transitional target. Updated `debug_grasp_ik.py` to print object-center distances and accept viewer camera overrides; the next target scan should try smaller side offsets before PPO training.
+- Added limit-aware multi-start selection to `debug_grasp_ik.py` with `--ik_random_starts` and `--min_joint_margin`. A target is now considered usable only when both IK position errors are under the acceptance threshold and both arms keep the configured normalized joint-limit margin.
+- Recorded the current Grasp IK scan result: `side_target_y=0.18`, `target_offset_z=0.15` reaches below `0.05m` position error but still places the right arm on a limit (`joint_margin_ratio=0.0000`), so PPO training should wait for a better target geometry or a non-limit IK solution.
+- Rejected the earlier `side_target_y=0.30`, `target_offset_z=0.20` Grasp IK candidate after video validation showed a long right-arm rotation path despite acceptable endpoint error and joint-limit margin.
+- Added path-aware gating to `debug_grasp_ik.py`: local IK seeds near the current posture, `--max_joint_delta`, `--max_joint_delta_norm`, printed `joint_delta_max_abs`/`joint_delta_l2`, and a stricter usable flag that requires endpoint error, joint-limit margin, and joint-space path length to pass.
+- Clarified the Grasp plan as IK-gated RL rather than IK-driven behavior: IK is only used before training to reject bad target geometry and pathological postures; PPO remains the learning method used in environment rollouts.
+- Added PPO-first fixed-scene `Isaac-Grasp-JZ-Bi-Approach-3D-v0` and play variant. It removes IK from the training target path, uses hand-written 3D TCP side targets, disables progress/contact/gripper/lift/orientation rewards, and keeps only 3D TCP tracking plus smoothness, posture, and joint-limit penalties for the next 2000-iteration run.
+- Added `--camera_eye` and `--camera_lookat` to RL-Games `play.py` so headless playback videos can use a higher camera angle that captures the full upper body.
+- Recorded that `grasp_approach3d_256env_2000it_v1` did not reach the targets reliably in video, so the exact 3D approach v1 configuration should not be continued only by increasing iterations.
+- Added easier PPO sanity tasks `Isaac-Grasp-JZ-Bi-Approach-3D-Easy-v0` and play variant. This version targets the middle bottle object root with zero side/height offset, raises arm action scale to `0.25`, adds direct distance penalties, strengthens broad target tracking, and relaxes smoothness/posture/limit penalties.
+- Added comparison tasks `Isaac-Grasp-JZ-Bi-Approach-3D-Easy-Smooth-v0` and play variant. They keep the Easy target/reward/PPO setup but strengthen only first-layer smoothness/posture weights for side-by-side training against the original Easy run.
+- Added `scripts/reinforcement_learning/rl_games/evaluate_grasp_checkpoint.py` for Grasp checkpoint diagnosis. It prints bottle root, left/right TCP positions, target/object-center distances, near-target ratios, action rate, max action, and joint velocity so failed approach videos can be quantified before reward or target changes.
+- Recorded the current Easy Grasp playback observation: the TCPs did not reach the middle bottle visually. The next gate is numeric Grasp checkpoint evaluation; do not continue the same run just by increasing iterations.
+- Added `mdp.weighted_joint_vel_l2` and comparison tasks `Isaac-Grasp-JZ-Bi-Approach-3D-Easy-Weighted-v0` / Play. This is the second-layer anti-swing experiment after Easy/Smooth evaluation showed zero near-object ratio and large action changes.
+- Added easier two-target curriculum tasks `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-v0` / Play. The scene now has a fixed left target cuboid and a fixed right target cuboid on the table; each TCP tracks the corresponding target's upper point instead of both arms tracking the same middle object center.
+- Extended `evaluate_grasp_checkpoint.py` with `--left_object` and `--right_object` so TwoTarget checkpoints can be evaluated against separate target objects.
+- Added playback-only arm colorization to `play.py` via `--colorize_arms`, `--left_arm_color`, and `--right_arm_color`. Grasp videos can now render the left arm/gripper blue and the right arm/gripper yellow without changing training.
+- Colored the TwoTarget visual target cuboids to match the arm colors: left target blue and right target yellow.
+
+## 2026-07-03
+- Added `harness/tasks/reach_environment_bringup_plan.md` defining the environment-first plan for producing a short-term usable Reach result: zero-action validation, joint sweep validation, TCP/target/reward sanity checks, and a conservative 3D position-only Reach task before further training.
+- Expanded the Reach environment bring-up plan with a server/headless MP4 debugging workflow, including playback recording commands, video discovery paths, SCP retrieval, naming conventions, and video-first judgment criteria.
+- Added `jz_isaac_lab/scripts/tools/debug_reach_env.py` to validate the Reach environment without a learned policy. It supports zero-action video, joint-sweep video, and TCP/command/reward sanity printing.
+- Recorded that zero-action drift in `Isaac-Reach-JZ-Bi-v0` may be caused by `JointPositionToLimitsActionCfg(rescale_to_limits=True)` mapping zero action toward joint-limit midpoints, so stable zero-action validation should be repeated with the Control-style action task.
+- Corrected the reset-randomization diagnostic to preserve the reset event and set its position range to zero. Re-ran zero-action reasoning: Control action offsets are correct, but the default pose drifts under gravity and becomes stable when robot gravity is disabled.
+- Added short-term `Isaac-Reach-JZ-Bi-PosOnly-v0` and `Isaac-Reach-JZ-Bi-PosOnly-Play-v0` tasks for a few-day usable Reach result. The tasks disable robot gravity, use Control-style relative joint-position actions, disable reset randomization, and restrict the workspace curriculum to the nearest target pool.
+- Fixed unresolved temporary `SceneEntityCfg` usage in `debug_reach_env.py` and `evaluate_checkpoint.py`; left/right TCP diagnostics and checkpoint evaluation now explicitly resolve body and joint ids before computing metrics.
+- Re-ran PosOnly TCP/target/reward sanity after resolving `SceneEntityCfg`; left/right TCPs are now distinct and targets are on the correct sides, with initial errors around `0.20m` left and `0.32m` right.
+- Added `Isaac-Reach-JZ-Bi-PosOnly-Smooth-v0` and play variant after the first PosOnly short run reached targets with excessive looping. The Smooth variant lowers action scale and strengthens smoothness penalties.
+- Recorded qualitative Smooth PosOnly video improvement: `reach_posonly_smooth_64env_300it_v1` reduces looping and target/action jumping compared with the first PosOnly short run.
+- Added `harness/tasks/reach_posonly_handoff.md`, a Chinese handoff document explaining the current environment, task code, action/observation design, reward terms, training commands, evaluation commands, video workflow, and next steps.
+- Imported and inspected the legacy handoff `jz_bi_reach.pth` checkpoint. It has 68-D observations and loads with the current original Reach task; a 20-step evaluation on GPU 4 showed about `0.157m` left/right error and nonzero near-goal ratio, but aggressive action and velocity statistics.
+- Evaluated the legacy handoff checkpoint for 300 steps. It is the best available Reach baseline, reaching about `0.009m` left and `0.010m` right last-50 TCP error with `near_goal_ratio_last50` about `0.94`, though settle ratio remains zero.
+- Updated `robot_simulator-main/docker/isaac/.env` for the migrated server paths under `/mnt/data2/ybd/robot_simulator` and Isaac cache root `/mnt/data2/ybd/isaac-sim-5.1`.
+- Confirmed migrated baseline and Easy Reach checkpoints are present under `jz_isaac_lab/logs/rl_games/jz_bi_reach/`.
+- Added `harness/context/jz_openarm_alignment.md` documenting the OpenArm-style behavior-interface hypothesis for JZ Reach.
+- Added experimental Control Reach task registrations `Isaac-Reach-JZ-Bi-Control-v0` and `Isaac-Reach-JZ-Bi-Control-Play-v0`.
+- Added `JZReachControlEnvCfg` and `JZReachControlEnvCfg_PLAY` using `JointPositionActionCfg(scale=0.5, use_default_offset=True)`, near-target command curriculum, and stronger smoothness/action penalties while leaving Easy v1 reward additions disabled.
+- Updated RL task contracts, Docker Isaac Lab context, and project state for the migrated paths and Control task.
+- Docker validation was attempted but blocked by host Docker socket permissions and unavailable passwordless sudo.
+- Completed and evaluated `reach_control_64env_300it_probe` on GPU 3. Recorded that Control v0 improves smoothness dramatically but has not learned successful reaching, with left-hand error worse than baseline and zero near-goal ratio.
+
+## 2026-07-02
+- Created AI Harness entry file `agent.md`.
+- Created long-term memory files `PROJECT_STATE.md`, `ROADMAP.md`, and `CHANGELOG.md`.
+- Created harness directory structure:
+  - `harness/tasks/`
+  - `harness/contracts/`
+  - `harness/context/`
+  - `harness/decisions/`
+- Recorded initial project phase and Isaac Lab RL bring-up baseline.
+- Added `harness/context/docker_isaac_lab.md` with host/container paths, Docker service, environment variables, and runtime notes.
+- Added `harness/contracts/rl_tasks.md` with RL task IDs, script entry points, CLI contracts, and checkpoint path rules.
+- Added `harness/tasks/reach_training.md` with smoke training, longer training, monitoring, playback, and study order.
+- Updated `PROJECT_STATE.md` to reference the new harness documentation.
+- Added `harness/context/server_migration.md` with target server requirements, project copy list, Docker image migration options, `.env` path updates, verification commands, and common failure points.
+- Updated `PROJECT_STATE.md` to reference the server migration guide.
+- Added `harness/context/reach_task_anatomy.md` documenting the Reach task registration, scene, actions, observations, commands, rewards, termination, curriculum, and PPO configuration.
+- Updated `PROJECT_STATE.md` to reference the Reach task anatomy document.
+- Recorded the completed `reach_128env_2000it_v1` baseline result and headless checkpoint evaluation in `harness/tasks/reach_training.md`.
+- Updated `PROJECT_STATE.md` with the baseline conclusion: reward improved, but reaching behavior is not yet successful.
+- Added experimental Easy Reach task registrations `Isaac-Reach-JZ-Bi-Easy-v0` and `Isaac-Reach-JZ-Bi-Easy-Play-v0`.
+- Added `JZReachEasyEnvCfg` and `JZReachEasyEnvCfg_PLAY` with reduced action scale, workspace curriculum, progress rewards, goal bonuses, and action max-absolute penalty.
+- Updated RL task contracts, Reach training notes, and project state with the Easy Reach experiment.
+- Recorded completed `reach_easy_128env_2000it_v1` results. Despite higher reward, numerical evaluation showed worse TCP errors and more aggressive actions than baseline.
+- Updated `PROJECT_STATE.md` with the Easy v1 conclusion and marked the exact configuration as unsuitable for continuation.
+- Added `harness/tasks/reach_tuning_log.md` recording the current Reach tuning rationale, baseline symptoms, planned parameter changes, evaluation criteria, and command templates.
+- Updated `PROJECT_STATE.md` to reference the Reach tuning log.
+- Rewrote `harness/tasks/reach_tuning_log.md` in Chinese and shortened it into a practical working log for current tuning.
