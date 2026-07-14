@@ -10,7 +10,8 @@ This document records stable task names, script entry points, and CLI contracts 
   `/workspace/jz_isaac_lab/scripts/reinforcement_learning/rl_games/play.py`
   - Grasp video clarity options: `--colorize_arms`, `--left_arm_color r,g,b`, `--right_arm_color r,g,b`
   - Playback debug coordinate axes: `--debug_axes`, `--debug_axis_scale <float>`, `--debug_grasp_target_offset x,y,z`
-  - The debug TCP axes use the midpoint of the configured fingertip links. For Grasp object targets, debug target axes use the object root plus `--debug_grasp_target_offset`.
+  - Playback-only gripper close override: `--force_gripper_close`, `--gripper_close_value <float>`, `--gripper_close_ramp_steps <int>`. This keeps checkpoint arm actions and overwrites Grasp action channels 14-17 for visual validation only.
+  - The debug TCP axes use the configured TCP helper on `left_arm_link7/right_arm_link7`. The current link7-local offsets are left `(0.0385, 0.23772, 0.0)` and right `(0.0385, -0.23772, 0.0)`, moved `0.03m` farther toward the corresponding bottle on 2026-07-13. For Grasp object targets, debug target axes use the object root plus `--debug_grasp_target_offset`.
 - Grasp checkpoint evaluator:
   `/workspace/jz_isaac_lab/scripts/reinforcement_learning/rl_games/evaluate_grasp_checkpoint.py`
 - Task listing script:
@@ -195,8 +196,11 @@ This document records stable task names, script entry points, and CLI contracts 
 - Main differences from TwoTarget:
   - near-goal joint velocity, TCP speed, and action-rate penalties are gated by the actual side target points, not by the visual object centers
   - bimanual stable dwell reward is enabled around the actual target points
-  - gripper action scales are set to zero because this stage is still approach-only
+  - gripper rewards remain disabled for approach-only learning, but gripper actions keep a nonzero default-pose-offset scale for numeric joint validation and later closure experiments
 - It keeps observation and action dimensions compatible with the existing TwoTarget checkpoint, so it can resume from `grasp_approach3d_twotarget_256env_2000it_v1/nn/jz_bi_grasp.pth`.
+- Gripper actions are no longer zero-scaled in the current config. They use default-pose-offset joint-position actions, so zero action holds the open reset pose and nonzero gripper actions can move the gripper joints and the visible moving finger meshes while preserving the 18-D action layout.
+- For visual checkpoint validation only, `play.py --start_gripper_closed` changes the robot's gripper reset/default pose to narrow `-0.0501` and wide `-0.0499` before creating the environment. This does not alter the training task's open reset pose, observation layout, or 18-D action contract.
+- Playback diagnostics can use `--debug_colliders` to show all PhysX collision shapes and `--print_gripper_diagnostics --diagnostic_every <steps>` to print both gripper joint pairs, four filtered fingertip forces, and both object positions.
 
 ## TwoTarget Track 3D Approach Grasp Task
 - Training task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-Track-v0`
@@ -207,10 +211,111 @@ This document records stable task names, script entry points, and CLI contracts 
   - left/right fine tanh tracking weight is strengthened from `0.5` to `1.0`
   - fine tracking `std` is tightened from `0.08` to `0.05`
 - It intentionally does not add the Stable variant's extra near-target speed/action-rate penalties.
+
+## TwoTarget Dynamic 3D Contact Validation Task
+- Training task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-Dynamic-v0`
+- Preferred playback task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-Dynamic-Play-v0`
+- Purpose: preserve the Track checkpoint interface while switching both target cuboids from fixed visual targets to dynamic rigid bodies for contact validation.
+- Main differences from Track:
+  - `object` and `right_object` use `kinematic_enabled=False`
+  - `object` and `right_object` use `disable_gravity=False`
+  - object damping is kept at `linear_damping=2.0`, `angular_damping=2.0`
+- It keeps the 18-D action layout and 66-D policy observation layout, so the existing bottle-center TwoTarget checkpoint can be played against dynamic objects before adding true closure/lift rewards.
 - Current good bottle-center checkpoint preserved outside the RL-Games run directory:
   `/workspace/saved_weights/grasp_twotarget_bottlecenter_good_20260707/jz_bi_grasp.pth`
+
+## TwoTarget Open-Gripper 6DOF Approach Task
+- Training task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-Open6D-v0`
+- Preferred playback task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-Open6D-Play-v0`
+- Contract: 66-D policy observation, 18-D action, fixed/kinematic cylinders, and zero-scaled gripper actions holding the open reset pose.
+- Per-side orientation reward: `exp(-(distance/0.20)^2) * 0.5 * (clamp(dot(TCP_Z, object_Z), 0, 1) + clamp(dot(TCP_Y, planar_direction_to_object), 0, 1))`, weighted by `+0.5` for each arm.
+- The planar direction is the TCP-to-cylinder-center vector projected perpendicular to object Z; within `0.03m`, it falls back to inward world directions `(0,-1,0)` left and `(0,+1,0)` right.
+- Run `grasp_open6d_axes_256env_300it_v1` completed 300 additional epochs from the bottle-center checkpoint on physical GPU 0. It preserved approach accuracy but failed bilateral posture learning: deterministic 64-env evaluation of the training-best checkpoint produced last-50 left/right Z dots `-0.750/0.941` and Y dots `-0.003/0.799`.
+- This run is diagnostic only. Do not promote it to closure/contact training; first correct and validate the left-side orientation learning signal.
+
+## TwoTarget Surface Pre-Grasp Task
+- Training task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-SurfacePregrasp-v0`
+- Preferred playback task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-SurfacePregrasp-Play-v0`
+- Contract: 66-D policy observation, 18-D action, fixed `0.03m` radius by `0.12m` cylinders, and zero-scaled gripper actions holding the open pose.
+- Active per-side task rewards are inner collision-surface clearance `+1.0` with desired gap `0.015m`, multiplicative 3D grasp centering `+1.0`, side-corrected semantic orientation `+0.5` (`-TCP_Y` left, `+TCP_Y` right), and any filtered contact above `1N` at `-0.5`.
+- It uses ray-cast narrow3/wide3 inner-surface local points `(0.0214, -0.01704202, 0)` and `(0.0214, 0.01789719, 0)`. TCP-to-cylinder-center progress/tracking rewards are disabled.
+- Run `grasp_surface_pregrasp_256env_300it_v1` completed through epoch 600 on GPU 0 but failed geometric acceptance. Epoch 550 is the safer diagnostic checkpoint; epoch 600 learned sustained right-finger collision and must not be used.
+- Playback can add `--debug_fingertip_contact_points` to show the exact reward points as 3mm red narrow/green wide markers. Current epoch-550 video: `jz_isaac_lab/logs/rl_games/jz_bi_grasp/grasp_surface_pregrasp_256env_300it_v1/videos/play/rl-video-step-0.mp4`.
   Host path:
   `/mnt/data2/ybd/robot_simulator/saved_weights/grasp_twotarget_bottlecenter_good_20260707/jz_bi_grasp.pth`
+
+## TwoTarget Surface Pre-Grasp V3 Task
+- Training task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-SurfacePregraspV3-v0`
+- Preferred playback task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-SurfacePregraspV3-Play-v0`
+- Contract: 96-D policy observation, 18-D action, fixed cylinders, calibrated inner-fingertip contact points, and zero-scaled open-gripper actions.
+- V3 is independent of V1/V2 and trains from scratch; do not load a 66-D checkpoint or continue the failed V2 checkpoint.
+- Dense per-side approach shaping uses the generic position TCP (current link7-local offsets left `(0.0385, 0.23772, 0)` and right `(0.0385, -0.23772, 0)`) at distance weight `-2.0`, Gaussian tracking with `std=0.25m` at `+1.0`, and signed/clamped step progress at `+2.0`. Fine geometry and contact terms still use calibrated narrow3/wide3 inner-surface points.
+- Z/approach-axis pose terms are gated by `exp(-(distance/0.15)^2)`. Clearance, gap balance, between-finger, horizontal, vertical, and level terms are gated by `exp(-(distance/0.08)^2)`.
+- Contact above `1N` is penalized at `-1.0` but does not terminate V3 episodes. The 50/30/15mm desired-gap curriculum remains active.
+- Required progression is `64 env x 20 epochs` smoke, then `256 x 100` probe, then `256 x 300` only after numeric acceptance. Total return alone is not acceptance evidence; evaluate midpoint distance, 8cm hit rate, surface gaps, center/height error, axis dots, and early-contact ratio.
+
+## TwoTarget Surface Pre-Grasp V4 Task
+- Training task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-SurfacePregraspV4-v0`
+- Preferred playback task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-SurfacePregraspV4-Play-v0`
+- Contract: 96-D policy observation, 18-D action, fixed cylinders, and zero-scaled open grippers. Train from scratch; earlier V3 checkpoints use a different approach objective.
+- The updated generic TCP tracks a `0.03m` radial stand-off from the cylinder Z axis with broad/fine widths `0.20m/0.04m`. Bottle-center height is tracked independently with widths `0.05m/0.02m`.
+- Radial progress is signed and clipped, and cannot be positive during real fingertip contact. Within a `0.06m` radial-error gate, radial speed and total TCP/object relative speed are penalized at `-0.5/-0.2`.
+- Pose and fine-geometry proximity gates are `0.30m/0.15m`. Contact above `1N` is penalized at `-3.0`; a 15-step persistent-contact term ramps to an additional `-2.0`. Contact does not terminate the episode.
+- A no-contact hold within `0.02m` radial error, `0.025m` height error, and `0.05m/s` relative speed ramps to `+2.0` over 15 steps.
+- Evaluator acceptance fields include `left/right_tcp_axis_radial_distance`, `radial_error`, `height_error`, `radial_speed`, `relative_speed`, plus existing surface geometry and contact metrics.
+
+## TwoTarget Surface Pre-Grasp V4.1 Task
+- Training task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-SurfacePregraspV41-v0`
+- Preferred playback task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-SurfacePregraspV41-Play-v0`
+- V4 remains unchanged. V4.1 retains its `96-D/18-D` interface and uses V4's unclipped policy-action behavior (`clip_actions: 100.0` in the wrapper and RL-Games policy clipping disabled).
+- The TCP height target is `0.03m` above bottle center with broad/fine widths `0.08m/0.025m`; direct radial and height absolute-error penalties have weights `-1.0/-2.0`.
+- Near-target radial and relative-speed penalties are strengthened to `-1.0/-0.5`. Stable hold requires `0.04m/s` or less for 20 steps, and near-object action-rate weight is `-0.003`.
+- Pose shaping remains gated at `0.30m`, with per-side corrected Z-axis and approach-axis weights raised from V4's `0.75/0.5` to `1.5/1.0`.
+- V4.1 adds no table ContactSensors, table-contact rewards, table-clearance rewards, or table-dependent stable-hold conditions. It still inherits V4's pre-existing generic-TCP clearance term unchanged.
+
+## TwoTarget Surface Pre-Grasp V4.2 Task
+- Training task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-SurfacePregraspV42-v0`
+- Preferred playback task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-SurfacePregraspV42-Play-v0`
+- V4.2 inherits the current unclipped V4.1 contract but moves the TCP radial stop target from `0.03m` to `0.05m`, leaving `0.02m` outside the cylinder surface before control overshoot.
+- A scheduled relative-speed excess penalty at `-5.0` applies only inside `0.10m` radial error. Allowed speeds are `0.15m/s` at `0.05-0.10m`, `0.08m/s` at `0.02-0.05m`, and `0.03m/s` inside `0.02m`.
+- Crossing inside the `0.05m` target while continuing inward is penalized linearly at `-10.0`. Stable hold requires radial error within `0.015m` and relative speed at most `0.03m/s`.
+- V4.2 adds no table-specific sensor or reward behavior. V4 and V4.1 remain unchanged for comparison.
+
+## TwoTarget Surface Pre-Grasp V4.3 Task
+- Training task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-SurfacePregraspV43-v0`
+- Preferred playback task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-SurfacePregraspV43-Play-v0`
+- V4.3 branches from unclipped V4.1 rather than V4.2 and uses a `0.05m` radial stop target. V4/V4.1/V4.2 remain unchanged.
+- Target radial velocity is `clamp(-1.5 * effective_error, -0.15, 0.08)m/s`, where effective error has a `0.005m` deadband. Absolute signed radial-velocity error has initial weight `-1.0`, so stopping or moving outward while far from the target remains penalized.
+- Non-radial relative speed is penalized linearly at `-0.5` through a linear gate over the final `0.05m`. Continued inward motion after crossing the stop radius is penalized at `-5.0`.
+- V4/V4.1 squared radial and relative-speed terms are disabled in V4.3. Stable no-contact hold rises to `+3.0` and requires radial error within `0.015m` and total relative speed at most `0.03m/s`.
+- V4.3 adds no table-specific sensor or reward behavior and retains the 96-D observation and 18-D action contract.
+
+## TwoTarget Surface Pre-Grasp V4.4 Task
+- Training task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-SurfacePregraspV44-v0`
+- Preferred playback task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-SurfacePregraspV44-Play-v0`
+- V4.4 inherits V4.3 linear velocity control and the `0.05m` radial target. It adds no table-specific shaping and does not alter the 96-D observation or 18-D action interface.
+- Per side, individual filtered ContactSensors cover all six `gripper_(narrow|wide)[1-3]_link` bodies and both `arm_link9/10` palm/wrist bodies. Forces are aggregated in rewards/evaluation and filtered only against the assigned cylinder at a `0.5N` threshold; distal tip sensors remain individually visible for diagnostics.
+- A normalized static safety barrier is zero at or outside `0.05m`, reaches `-1.5` at `0.04m`, and saturates at `-3.0` at or inside the `0.03m` bottle radius. Inside-target linear radial velocity error is multiplied by `3.0`.
+- Any full-gripper contact is `-3.0`, palm contact adds `-2.0`, and persistent full-gripper contact ramps to `-2.0` over 15 steps. Contact does not terminate the episode.
+- Stable hold is `+3.0` only within `0.005m` radial error, `0.02m` height error, `0.03m/s` relative speed, and no tip/full-finger/palm contact. Height fine tracking rises to `+1.0` and direct height error to `-3.0`.
+- Evaluator fields add per-side `full_finger_force`, `palm_force`, and `full_gripper_contact_ratio`.
+
+## TwoTarget Minimal Gripper Closure Task
+- Training task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-GraspClose-v0`
+- Preferred playback task: `Isaac-Grasp-JZ-Bi-Approach-3D-TwoTarget-GraspClose-Play-v0`
+- Purpose: learn approach, near-object closure, real bilateral fingertip contact, and short stable-contact dwell before any lift curriculum.
+- Interface remains compatible with the bottle-center approach checkpoint:
+  - policy observation: `66`
+  - action: `18` (`7 + 7` arm and `2 + 2` gripper)
+  - contact forces are reward-only and are not added to policy observations
+- Both targets are dynamic cylinders with radius `0.03m`, height `0.12m`, mass `0.20kg`, gravity enabled, and filtered ContactSensors on each distal `narrow3/wide3` finger link.
+- Added reward weights per arm:
+  - close while farther than `0.10m`: `-0.3`
+  - close within `0.07m` while relative speed is at most `0.04m/s`: `+0.8`
+  - real simultaneous narrow/wide fingertip contact: `+2.0`
+  - bilateral contact dwell for 15 steps while relative speed is at most `0.05m/s`: `+1.0`
+- Lift rewards are disabled in this task. Do not treat object motion or rising total reward alone as grasp success; require bilateral contact and playback validation.
+- Symmetric right-handed semantic TCP/target frames use `wxyz` quaternions left `(0.70710678, 0, 0, 0.70710678)` and right `(0.70710678, 0, 0, -0.70710678)`. On the right, blue Z is world-up, red X points outward (`-world Y`), and green Y points forward (`+world X`); the left frame is rotated 180 degrees around world Z. Side-specific fixed offsets convert the asymmetric URDF `link9` orientations into these semantic TCP frames. Cylinder geometry remains upright.
 
 ## Grasp Checkpoint Evaluation CLI Contract
 Minimal command shape:

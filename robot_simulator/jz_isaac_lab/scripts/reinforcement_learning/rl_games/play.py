@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import traceback
 from pathlib import Path
 
 import yaml
@@ -36,10 +37,48 @@ parser.add_argument("--right_arm_color", type=str, default="1.0,0.82,0.05", help
 parser.add_argument("--debug_axes", action="store_true", default=False, help="Draw coordinate axes at both TCPs and targets.")
 parser.add_argument("--debug_axis_scale", type=float, default=0.06, help="Scale for playback debug coordinate axes.")
 parser.add_argument(
+    "--debug_fingertip_contact_points",
+    action="store_true",
+    default=False,
+    help="Draw the four inner collision-surface points used by pre-grasp rewards.",
+)
+parser.add_argument("--debug_colliders", action="store_true", default=False, help="Show all PhysX collision shapes.")
+parser.add_argument(
+    "--print_gripper_diagnostics",
+    action="store_true",
+    default=False,
+    help="Print gripper joints, filtered fingertip forces, and object positions.",
+)
+parser.add_argument("--diagnostic_every", type=int, default=30, help="Step interval for gripper diagnostics.")
+parser.add_argument(
     "--debug_grasp_target_offset",
     type=str,
     default="0.0,0.0,0.0",
     help="Base-frame xyz offset from grasp object centers to the visualized target point.",
+)
+parser.add_argument(
+    "--force_gripper_close",
+    action="store_true",
+    default=False,
+    help="Playback-only override: keep checkpoint arm actions but force both gripper action terms to close.",
+)
+parser.add_argument(
+    "--start_gripper_closed",
+    action="store_true",
+    default=False,
+    help="Playback-only override: set both grippers closed in the robot reset/default joint pose before creating the env.",
+)
+parser.add_argument(
+    "--gripper_close_value",
+    type=float,
+    default=1.0,
+    help="Absolute close command used with --force_gripper_close.",
+)
+parser.add_argument(
+    "--gripper_close_ramp_steps",
+    type=int,
+    default=90,
+    help="Ramp length in playback steps for --force_gripper_close.",
 )
 parser.add_argument("--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O.")
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
@@ -99,13 +138,24 @@ import isaaclab_tasks  # noqa: F401
 import jzlab.tasks  # noqa: F401
 from jzlab.tasks.manager_based.jz_manipulation.bimanual.reach import mdp
 from jzlab.tasks.manager_based.jz_manipulation.constants import (
+    FINGERTIP_INNER_CONTACT_LOCAL_OFFSETS,
     LEFT_ARM_JOINTS,
+    LEFT_GRIPPER_CLOSED,
+    LEFT_GRIPPER_JOINTS,
+    LEFT_GRASP_TARGET_QUAT_W,
     LEFT_TCP_ORIENTATION_LINK,
+    LEFT_TCP_ORIENTATION_OFFSET_QUAT,
     LEFT_TCP_POSITION_LINKS,
     RIGHT_ARM_JOINTS,
+    RIGHT_GRIPPER_CLOSED,
+    RIGHT_GRIPPER_JOINTS,
+    RIGHT_GRASP_TARGET_QUAT_W,
     RIGHT_TCP_ORIENTATION_LINK,
+    RIGHT_TCP_ORIENTATION_OFFSET_QUAT,
     RIGHT_TCP_POSITION_LINKS,
+    TCP_CONTACT_LOCAL_OFFSETS,
 )
+from isaaclab.utils.math import quat_apply, quat_mul
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
@@ -194,6 +244,79 @@ def _parse_vec3(text: str, fallback: tuple[float, float, float]) -> tuple[float,
     if len(values) != 3:
         return fallback
     return (values[0], values[1], values[2])
+
+
+def _override_gripper_close_actions(actions: torch.Tensor, step: int) -> torch.Tensor:
+    if not args_cli.force_gripper_close or actions.shape[-1] < 18:
+        return actions
+    ramp_steps = max(1, int(args_cli.gripper_close_ramp_steps))
+    value = min(1.0, float(step) / float(ramp_steps)) * float(args_cli.gripper_close_value)
+    actions = actions.clone()
+    actions[:, 14] = value
+    actions[:, 15] = -value
+    actions[:, 16] = value
+    actions[:, 17] = -value
+    return actions
+
+
+def _set_robot_gripper_default_closed(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg) -> None:
+    if not args_cli.start_gripper_closed or not hasattr(env_cfg, "scene") or not hasattr(env_cfg.scene, "robot"):
+        return
+    joint_pos = dict(getattr(env_cfg.scene.robot.init_state, "joint_pos", {}) or {})
+    joint_pos.update(LEFT_GRIPPER_CLOSED)
+    joint_pos.update(RIGHT_GRIPPER_CLOSED)
+    env_cfg.scene.robot.init_state.joint_pos = joint_pos
+    print("[INFO] Playback reset override: starting both grippers closed.")
+
+
+def _enable_collider_visualization() -> None:
+    if not args_cli.debug_colliders:
+        return
+    import carb
+
+    carb.settings.get_settings().set_int("/persistent/physics/visualizationDisplayColliders", 2)
+    print("[INFO] PhysX collider visualization enabled: Show on All.")
+
+
+class _GripperDiagnostics:
+    """Playback-only numeric check for closure and filtered fingertip contact."""
+
+    _SENSOR_NAMES = (
+        "left_narrow_contact",
+        "left_wide_contact",
+        "right_narrow_contact",
+        "right_wide_contact",
+    )
+
+    def __init__(self, env):
+        self._env = getattr(env, "unwrapped", env)
+        self._robot = self._env.scene["robot"]
+        self._left_joint_ids = list(self._robot.find_joints(LEFT_GRIPPER_JOINTS)[0])
+        self._right_joint_ids = list(self._robot.find_joints(RIGHT_GRIPPER_JOINTS)[0])
+
+    def print(self, step: int) -> None:
+        left_pos = self._robot.data.joint_pos[0, self._left_joint_ids].detach().cpu().tolist()
+        right_pos = self._robot.data.joint_pos[0, self._right_joint_ids].detach().cpu().tolist()
+        print(f"[step {step}] gripper diagnostics")
+        print(f"  left_gripper_joint_pos:  {left_pos}")
+        print(f"  right_gripper_joint_pos: {right_pos}")
+        for sensor_name in self._SENSOR_NAMES:
+            try:
+                force_matrix_w = self._env.scene[sensor_name].data.force_matrix_w
+            except Exception as exc:
+                print(f"  {sensor_name}_filtered_force_n: unavailable ({exc})")
+                continue
+            if force_matrix_w is None:
+                print(f"  {sensor_name}_filtered_force_n: unavailable (no force matrix)")
+                continue
+            force_n = torch.linalg.vector_norm(force_matrix_w[0], dim=-1).max().item()
+            print(f"  {sensor_name}_filtered_force_n: {force_n:.6f}")
+        for object_name in ("object", "right_object"):
+            try:
+                pos = self._env.scene[object_name].data.root_pos_w[0].detach().cpu().tolist()
+            except Exception:
+                continue
+            print(f"  {object_name}_root_pos_w: {pos}")
 
 
 def _infer_checkpoint_mlp_units(checkpoint_path: str) -> list[int] | None:
@@ -687,10 +810,6 @@ class _PlaybackDebugAxes:
         self._env = getattr(env, "unwrapped", env)
         self._task_name = task_name
         self._grasp_target_offset_b = torch.tensor(grasp_target_offset_b, device=self._env.device, dtype=torch.float32)
-        self._left_position_body_names = LEFT_TCP_POSITION_LINKS
-        self._right_position_body_names = RIGHT_TCP_POSITION_LINKS
-        self._left_orientation_body_name = LEFT_TCP_ORIENTATION_LINK
-        self._right_orientation_body_name = RIGHT_TCP_ORIENTATION_LINK
         self._resolved = False
         self._warned = False
 
@@ -715,10 +834,10 @@ class _PlaybackDebugAxes:
         try:
             robot = self._env.scene["robot"]
             self._robot = robot
-            self._left_pos_body_ids = list(robot.find_bodies(list(self._left_position_body_names))[0])
-            self._right_pos_body_ids = list(robot.find_bodies(list(self._right_position_body_names))[0])
-            self._left_ori_body_id = int(robot.find_bodies([self._left_orientation_body_name])[0][0])
-            self._right_ori_body_id = int(robot.find_bodies([self._right_orientation_body_name])[0][0])
+            self._left_tcp_body_ids = [int(body_id) for body_id in robot.find_bodies(LEFT_TCP_POSITION_LINKS)[0]]
+            self._right_tcp_body_ids = [int(body_id) for body_id in robot.find_bodies(RIGHT_TCP_POSITION_LINKS)[0]]
+            self._left_tcp_orientation_body_id = int(robot.find_bodies([LEFT_TCP_ORIENTATION_LINK])[0][0])
+            self._right_tcp_orientation_body_id = int(robot.find_bodies([RIGHT_TCP_ORIENTATION_LINK])[0][0])
         except Exception as exc:
             if not self._warned:
                 print(f"[WARN] Unable to initialize playback debug TCP axes: {exc}")
@@ -728,9 +847,24 @@ class _PlaybackDebugAxes:
         self._resolved = True
         return True
 
-    def _tcp_pose_w(self, body_ids: list[int], orientation_body_id: int) -> tuple[torch.Tensor, torch.Tensor]:
-        pos_w = self._robot.data.body_pos_w[:, body_ids, :].mean(dim=1)
-        quat_w = self._robot.data.body_quat_w[:, orientation_body_id, :]
+    def _tcp_pose_w(
+        self, body_ids: list[int], orientation_body_id: int, orientation_offset: tuple[float, float, float, float]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        body_pos_w = self._robot.data.body_pos_w[:, body_ids, :]
+        body_quat_w = self._robot.data.body_quat_w[:, body_ids, :]
+        local_offsets = torch.tensor(
+            [TCP_CONTACT_LOCAL_OFFSETS.get(self._robot.body_names[body_id], (0.0, 0.0, 0.0)) for body_id in body_ids],
+            device=body_pos_w.device,
+            dtype=body_pos_w.dtype,
+        )
+        offsets_w = quat_apply(
+            body_quat_w.reshape(-1, 4),
+            local_offsets.unsqueeze(0).expand(body_pos_w.shape[0], -1, -1).reshape(-1, 3),
+        ).reshape_as(body_pos_w)
+        pos_w = (body_pos_w + offsets_w).mean(dim=1)
+        link_quat_w = self._robot.data.body_quat_w[:, orientation_body_id, :]
+        offset = torch.tensor(orientation_offset, device=link_quat_w.device, dtype=link_quat_w.dtype)
+        quat_w = quat_mul(link_quat_w, offset.view(1, 4).expand_as(link_quat_w))
         return pos_w, quat_w
 
     def _command_target_pose_w(self, command_name: str) -> tuple[torch.Tensor, torch.Tensor] | None:
@@ -742,14 +876,14 @@ class _PlaybackDebugAxes:
         pose_command_w = term.pose_command_w
         return pose_command_w[:, :3], pose_command_w[:, 3:]
 
-    def _scene_object_pose_w(self, object_name: str) -> tuple[torch.Tensor, torch.Tensor] | None:
+    def _scene_object_pose_w(self, object_name: str, side: str) -> tuple[torch.Tensor, torch.Tensor] | None:
         try:
             obj = self._env.scene[object_name]
         except Exception:
             return None
         pos_w = obj.data.root_pos_w + self._grasp_target_offset_b.view(1, 3)
-        quat_w = torch.zeros((pos_w.shape[0], 4), device=pos_w.device, dtype=pos_w.dtype)
-        quat_w[:, 0] = 1.0
+        target_quat = LEFT_GRASP_TARGET_QUAT_W if side == "left" else RIGHT_GRASP_TARGET_QUAT_W
+        quat_w = torch.tensor(target_quat, device=pos_w.device, dtype=pos_w.dtype).view(1, 4).expand(pos_w.shape[0], -1)
         return pos_w, quat_w
 
     def _target_pose_w(self, side: str) -> tuple[torch.Tensor, torch.Tensor] | None:
@@ -759,18 +893,22 @@ class _PlaybackDebugAxes:
             return command_pose
 
         if side == "right":
-            right_object_pose = self._scene_object_pose_w("right_object")
+            right_object_pose = self._scene_object_pose_w("right_object", side)
             if right_object_pose is not None:
                 return right_object_pose
-        return self._scene_object_pose_w("object")
+        return self._scene_object_pose_w("object", side)
 
     def update(self) -> None:
         if not self._resolve_once():
             return
 
         try:
-            left_tcp_pos, left_tcp_quat = self._tcp_pose_w(self._left_pos_body_ids, self._left_ori_body_id)
-            right_tcp_pos, right_tcp_quat = self._tcp_pose_w(self._right_pos_body_ids, self._right_ori_body_id)
+            left_tcp_pos, left_tcp_quat = self._tcp_pose_w(
+                self._left_tcp_body_ids, self._left_tcp_orientation_body_id, LEFT_TCP_ORIENTATION_OFFSET_QUAT
+            )
+            right_tcp_pos, right_tcp_quat = self._tcp_pose_w(
+                self._right_tcp_body_ids, self._right_tcp_orientation_body_id, RIGHT_TCP_ORIENTATION_OFFSET_QUAT
+            )
             left_target = self._target_pose_w("left")
             right_target = self._target_pose_w("right")
 
@@ -783,6 +921,84 @@ class _PlaybackDebugAxes:
         except Exception as exc:
             if not self._warned:
                 print(f"[WARN] Failed to update playback debug axes for {self._task_name}: {exc}")
+                self._warned = True
+
+
+class _PlaybackFingertipContactPoints:
+    """Playback markers for the inner narrow3/wide3 collision-surface points."""
+
+    _BODY_NAMES = (
+        "left_gripper_narrow3_link",
+        "left_gripper_wide3_link",
+        "right_gripper_narrow3_link",
+        "right_gripper_wide3_link",
+    )
+
+    def __init__(self, env, radius: float = 0.003):
+        import isaaclab.sim as sim_utils
+        from isaaclab.markers import VisualizationMarkers
+        from isaaclab.markers.visualization_markers import VisualizationMarkersCfg
+
+        self._env = getattr(env, "unwrapped", env)
+        self._resolved = False
+        self._warned = False
+        cfg = VisualizationMarkersCfg(
+            prim_path="/Visuals/PlaybackFingertipContactPoints",
+            markers={
+                "narrow": sim_utils.SphereCfg(
+                    radius=radius,
+                    visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.05, 0.05)),
+                ),
+                "wide": sim_utils.SphereCfg(
+                    radius=radius,
+                    visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.05, 1.0, 0.15)),
+                ),
+            },
+        )
+        self._marker = VisualizationMarkers(cfg)
+
+    def _resolve_once(self) -> bool:
+        if self._resolved:
+            return True
+        try:
+            self._robot = self._env.scene["robot"]
+            self._body_ids = [int(self._robot.find_bodies([name])[0][0]) for name in self._BODY_NAMES]
+            self._local_offsets = torch.tensor(
+                [FINGERTIP_INNER_CONTACT_LOCAL_OFFSETS[name] for name in self._BODY_NAMES],
+                device=self._env.device,
+                dtype=torch.float32,
+            )
+            self._marker_indices = torch.tensor(
+                [0, 1, 0, 1], device=self._env.device, dtype=torch.int32
+            ).view(1, 4).expand(self._env.num_envs, -1).reshape(-1)
+        except Exception as exc:
+            if not self._warned:
+                print(f"[WARN] Unable to initialize playback fingertip points: {exc}")
+                self._warned = True
+            return False
+        self._resolved = True
+        return True
+
+    def update(self) -> None:
+        if not self._resolve_once():
+            return
+        try:
+            body_pos_w = self._robot.data.body_pos_w[:, self._body_ids, :]
+            body_quat_w = self._robot.data.body_quat_w[:, self._body_ids, :]
+            offsets_w = quat_apply(
+                body_quat_w.reshape(-1, 4),
+                self._local_offsets.to(dtype=body_pos_w.dtype)
+                .unsqueeze(0)
+                .expand(body_pos_w.shape[0], -1, -1)
+                .reshape(-1, 3),
+            ).reshape_as(body_pos_w)
+            self._marker.visualize(
+                translations=(body_pos_w + offsets_w).reshape(-1, 3),
+                marker_indices=self._marker_indices,
+            )
+        except Exception as exc:
+            if not self._warned:
+                print(f"[WARN] Failed to update playback fingertip points: {exc}")
                 self._warned = True
 
 
@@ -829,13 +1045,21 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env_cfg.viewer.eye = _parse_vec3(args_cli.camera_eye, (3.2, 3.4, 3.0))
         env_cfg.viewer.lookat = _parse_vec3(args_cli.camera_lookat, (0.65, 0.0, 1.35))
 
+    _set_robot_gripper_default_closed(env_cfg)
+    _enable_collider_visualization()
+
     rl_device = agent_cfg["params"]["config"]["device"]
     clip_obs = agent_cfg["params"]["env"].get("clip_observations", math.inf)
     clip_actions = agent_cfg["params"]["env"].get("clip_actions", math.inf)
     obs_groups = agent_cfg["params"]["env"].get("obs_groups")
     concate_obs_groups = agent_cfg["params"]["env"].get("concate_obs_groups", True)
 
-    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    try:
+        env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    except Exception:
+        print("[ERROR] Failed while constructing playback environment.")
+        traceback.print_exc()
+        raise
 
     if isinstance(env.unwrapped, DirectMARLEnv):
         env = multi_agent_to_single_agent(env)
@@ -865,6 +1089,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             max(float(args_cli.debug_axis_scale), 0.01),
             _parse_vec3(args_cli.debug_grasp_target_offset, (0.0, 0.0, 0.0)),
         )
+    fingertip_markers = _PlaybackFingertipContactPoints(env) if args_cli.debug_fingertip_contact_points else None
 
     if args_cli.video:
         video_kwargs = {
@@ -877,7 +1102,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print_dict(video_kwargs, nesting=4)
         env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
-    env = RlGamesVecEnvWrapper(env, rl_device, clip_obs, clip_actions, obs_groups, concate_obs_groups)
+    try:
+        env = RlGamesVecEnvWrapper(env, rl_device, clip_obs, clip_actions, obs_groups, concate_obs_groups)
+    except Exception:
+        print("[ERROR] Failed while wrapping playback environment for RL-Games.")
+        traceback.print_exc()
+        raise
 
     vecenv.register(
         "IsaacRlgWrapper", lambda config_name, num_actors, **kwargs: RlGamesGpuEnv(config_name, num_actors, **kwargs)
@@ -889,18 +1119,33 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     print(f"[INFO]: Loading model checkpoint from: {agent_cfg['params']['load_path']}")
 
     agent_cfg["params"]["config"]["num_actors"] = env.unwrapped.num_envs
-    runner = Runner()
-    runner.load(agent_cfg)
-    agent: BasePlayer = runner.create_player()
-    agent.restore(resume_path)
-    agent.reset()
+    try:
+        runner = Runner()
+        runner.load(agent_cfg)
+        agent: BasePlayer = runner.create_player()
+        agent.restore(resume_path)
+        agent.reset()
+    except Exception:
+        print("[ERROR] Failed while loading playback checkpoint/player.")
+        traceback.print_exc()
+        raise
 
     dt = env.unwrapped.step_dt
-    obs = env.reset()
+    try:
+        obs = env.reset()
+    except Exception:
+        print("[ERROR] Failed while resetting playback environment.")
+        traceback.print_exc()
+        raise
     if isinstance(obs, dict):
         obs = obs["obs"]
     if debug_axes is not None:
         debug_axes.update()
+    if fingertip_markers is not None:
+        fingertip_markers.update()
+    diagnostics = _GripperDiagnostics(env) if args_cli.print_gripper_diagnostics else None
+    if diagnostics is not None:
+        diagnostics.print(0)
     timestep = 0
     _ = agent.get_batch_size(obs, 1)
     if agent.is_rnn:
@@ -911,9 +1156,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         with torch.inference_mode():
             obs = agent.obs_to_torch(obs)
             actions = agent.get_action(obs, is_deterministic=agent.is_deterministic)
+            actions = _override_gripper_close_actions(actions, timestep)
             obs, _, dones, _ = env.step(actions)
             if debug_axes is not None:
                 debug_axes.update()
+            if fingertip_markers is not None:
+                fingertip_markers.update()
+            if diagnostics is not None and (timestep + 1) % max(1, int(args_cli.diagnostic_every)) == 0:
+                diagnostics.print(timestep + 1)
 
             if len(dones) > 0 and agent.is_rnn and agent.states is not None:
                 for state in agent.states:
